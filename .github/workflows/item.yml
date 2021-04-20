@@ -3,7 +3,7 @@ name: Item - Prepare dependencies
 on:
   push:
     branches:
-    - 'releases/**'
+    - 'master'
     paths:
     - 'item/**'
     - '!item/services/**'
@@ -22,14 +22,19 @@ jobs:
     name: Setup, Build, Publish, and Deploy
     runs-on: ubuntu-latest
     steps:
+    - name: Cancel Previous Runs
+      uses: styfle/cancel-workflow-action@0.4.1
+      with:
+        access_token: ${{ github.token }}
 
     - name: Checkout
       uses: actions/checkout@master
 
     # Setup gcloud CLI
-    - uses: GoogleCloudPlatform/github-actions/setup-gcloud@master
+    - uses: google-github-actions/setup-gcloud@master
       with:
-        version: '270.0.0'
+        version: '290.0.1'
+        project_id: ${{ secrets.GCP_PROJECT }}
         service_account_key: ${{ secrets.GCP_SA_KEY }}
 
     # Configure docker to use the gcloud command-line tool as a credential helper
@@ -38,18 +43,11 @@ jobs:
         # via gcloud command-line tool.
         gcloud auth configure-docker
 
-    # Install helm
-    - name: Install Helm
-      run: |
-        curl https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 > get_helm.sh
-        chmod 700 get_helm.sh
-        ./get_helm.sh
-
     # Deploy the Docker image to the GKE cluster
-    - name: Deploy
+    - name: Prisma
       env:
         POSTGRES_HOST: ${{ secrets.POSTGRES_HOST }}
-        POSTGRES_USER: postgres
+        POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
         POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
         S3_TOKEN: ${{ secrets.S3_TOKEN }}
         S3_SECRET: ${{ secrets.S3_SECRET }}
@@ -59,25 +57,69 @@ jobs:
       run: |
         gcloud container clusters get-credentials $GKE_CLUSTER --zone $GKE_ZONE --project $GCP_PROJECT
         kubectl get namespace $NAMESPACE || kubectl create namespace $NAMESPACE
-        helm dependency update item/
+        helm repo add stable https://charts.helm.sh/stable
+        helm upgrade --install \
+          --wait \
+          --set database.host="$POSTGRES_HOST" \
+          --set database.user="$POSTGRES_USER" \
+          --set database.password="$POSTGRES_PASSWORD" \
+          --set database.port="5432" \
+          --set database.name="$RELEASE_NAME-$NAMESPACE-prisma" \
+          --set resources.requests.memory="256Mi" \
+          --set resources.requests.cpu="100m" \
+          --set resources.limits.memory="512Mi" \
+          --set resources.limits.cpu="300m" \
+          --namespace="$NAMESPACE" \
+          "$RELEASE_NAME-prisma" \
+          stable/prisma
+
+    - name: Redis
+      env:
+        POSTGRES_HOST: ${{ secrets.POSTGRES_HOST }}
+        POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+        POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+        S3_TOKEN: ${{ secrets.S3_TOKEN }}
+        S3_SECRET: ${{ secrets.S3_SECRET }}
+        JWT_SECRET: ${{ secrets.JWT_SECRET }}
+        ALGOLIA_APP_ID: ${{ secrets.ALGOLIA_APP_ID }}
+        ALGOLIA_API_SECRET: ${{ secrets.ALGOLIA_API_SECRET }}
+      run: |
+        gcloud container clusters get-credentials $GKE_CLUSTER --zone $GKE_ZONE --project $GCP_PROJECT
+        kubectl get namespace $NAMESPACE || kubectl create namespace $NAMESPACE
+        helm repo add bitnami https://charts.bitnami.com/bitnami
+        helm upgrade --install \
+          --wait \
+          --set enabled="true" \
+          --set nameOverride="redis" \
+          --set auth.enabled="false" \
+          --set replica.replicaCount="1" \
+          --namespace="$NAMESPACE" \
+          "$RELEASE_NAME-redis" \
+          bitnami/redis
+
+    - name: App
+      env:
+        POSTGRES_HOST: ${{ secrets.POSTGRES_HOST }}
+        POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+        POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+        S3_TOKEN: ${{ secrets.S3_TOKEN }}
+        S3_SECRET: ${{ secrets.S3_SECRET }}
+        JWT_SECRET: ${{ secrets.JWT_SECRET }}
+        ALGOLIA_APP_ID: ${{ secrets.ALGOLIA_APP_ID }}
+        ALGOLIA_API_SECRET: ${{ secrets.ALGOLIA_API_SECRET }}
+      run: |
+        gcloud container clusters get-credentials $GKE_CLUSTER --zone $GKE_ZONE --project $GCP_PROJECT
+        kubectl get namespace $NAMESPACE || kubectl create namespace $NAMESPACE
         helm upgrade --install \
           --wait \
           --set releaseOverride="$RELEASE_NAME" \
-          --set prismaEndpoint="http://$RELEASE_NAME-prisma.$NAMESPACE:4466" \
-          --set redisUrl="redis://$RELEASE_NAME-redis-master.$NAMESPACE:6379" \
+          --set prismaEndpoint="http://$RELEASE_NAME-prisma.$NAMESPACE.svc.cluster.local:4466" \
+          --set redisUrl="redis://$RELEASE_NAME-redis-master.$NAMESPACE.svc.cluster.local:6379" \
           --set s3Token="$S3_TOKEN" \
           --set algoliaAppId="$ALGOLIA_APP_ID" \
           --set jwtSecret="$JWT_SECRET" \
           --set s3Secret="$S3_SECRET" \
           --set algoliaApiSecret="$ALGOLIA_API_SECRET" \
-          --set prisma.enabled="true" \
-          --set prisma.nameOverride="prisma" \
-          --set prisma.database.host="$POSTGRES_HOST" \
-          --set prisma.database.user="$POSTGRES_USER" \
-          --set prisma.database.password="$POSTGRES_PASSWORD" \
-          --set prisma.database.port="5432" \
-          --set redis.enabled="true" \
-          --set redis.nameOverride="redis" \
           --namespace="$NAMESPACE" \
           "$RELEASE_NAME" \
           item/

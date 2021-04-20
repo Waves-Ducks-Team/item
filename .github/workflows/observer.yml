@@ -3,7 +3,7 @@ name: Observer - Build & deploy to cluster
 on:
   push:
     branches:
-    - 'releases/**'
+    - 'master'
     paths:
     - 'services/observer/**'
     - 'item/services/observer/**'
@@ -24,14 +24,19 @@ jobs:
     name: Setup, Build, Publish, and Deploy
     runs-on: ubuntu-latest
     steps:
+    - name: Cancel Previous Runs
+      uses: styfle/cancel-workflow-action@0.4.1
+      with:
+        access_token: ${{ github.token }}
 
     - name: Checkout
       uses: actions/checkout@master
 
     # Setup gcloud CLI
-    - uses: GoogleCloudPlatform/github-actions/setup-gcloud@master
+    - uses: google-github-actions/setup-gcloud@master
       with:
-        version: '270.0.0'
+        version: '290.0.1'
+        project_id: ${{ secrets.GCP_PROJECT }}
         service_account_key: ${{ secrets.GCP_SA_KEY }}
 
     # Configure docker to use the gcloud command-line tool as a credential helper
@@ -53,13 +58,6 @@ jobs:
       run: |
         docker push gcr.io/$GCP_PROJECT/$IMAGE:$GITHUB_SHA
 
-    # Install helm
-    - name: Install Helm
-      run: |
-        curl https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 > get_helm.sh
-        chmod 700 get_helm.sh
-        ./get_helm.sh
-
     # Deploy the Docker image to the GKE cluster
     - name: Deploy
       env:
@@ -71,7 +69,7 @@ jobs:
       run: |
         gcloud container clusters get-credentials $GKE_CLUSTER --zone $GKE_ZONE --project $GCP_PROJECT
         kubectl get namespace $NAMESPACE || kubectl create namespace $NAMESPACE
-        helm dependency update item/services/$SERVICE_NAME/
+        helm repo add stable https://charts.helm.sh/stable
         helm upgrade --install \
           --wait \
           --set releaseOverride="$RELEASE_NAME" \
@@ -79,8 +77,8 @@ jobs:
           --set image.tag="$GITHUB_SHA" \
           --set image.pullPolicy=IfNotPresent \
           --set replicaCount="$REPLICAS" \
-          --set prismaEndpoint="http://$RELEASE_NAME-prisma.item:4466" \
-          --set redisUrl="redis://$RELEASE_NAME-redis-master.item:6379" \
+          --set prismaEndpoint="http://$RELEASE_NAME-prisma.item.svc.cluster.local:4466" \
+          --set redisUrl="redis://$RELEASE_NAME-redis-master.item.svc.cluster.local:6379" \
           --set s3Token="$S3_TOKEN" \
           --set algoliaAppId="$ALGOLIA_APP_ID" \
           --set jwtSecret="$JWT_SECRET" \

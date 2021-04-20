@@ -1,6 +1,6 @@
 replicaCount: 1
 image:
-  repository: https://github.com/wavesplatform/item
+  repository: https://github.com/Waves-Ducks-Team/item
   tag: stable
   pullPolicy: Always
 application:
