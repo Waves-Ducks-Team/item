@@ -1,18 +1,18 @@
 name: Media Preserver - Build & deploy to cluster
 
 on:
-  push:
-    branches:
-    - 'releases/**'
-    paths:
-    - 'services/media-preserver/**'
-    - 'item/services/media-preserver/**'
+  push
+#    branches:
+#    - 'releases/**'
+#    paths:
+#    - 'services/media-preserver/**'
+#    - 'item/services/media-preserver/**'
 
 # Environment variables available to all jobs and steps in this workflow
 env:
   GCP_PROJECT: ${{ secrets.GCP_PROJECT }}
-  GKE_ZONE: us-central1-a
-  GKE_CLUSTER: item-cluster-1
+  GKE_ZONE: ${{ secrets.GKE_ZONE }}
+  GKE_CLUSTER: ${{ secrets.GKE_CLUSTER }}
   REPLICAS: 1
   SERVICE_NAME: media-preserver
   IMAGE: media-preserver
