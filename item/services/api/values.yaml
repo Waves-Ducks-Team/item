@@ -8,10 +8,13 @@ application:
   tier: web
 service:
   name: web
-  type: NodePort
+  type: ClusterIP
   externalPort: 80
   internalPort: 3000
   url: http://my.host.com/
 ingress:
+  email: nobody@nobody.io
+  privateKeySecretRef: example-issuer-account-key
   enabled: true
 resources:
+
